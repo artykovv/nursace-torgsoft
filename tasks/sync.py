@@ -80,7 +80,7 @@ async def sync_torgsoft_csv() -> dict:
 
         # Чтение CSV-файла
         try:
-            async with aiofiles.open("torgsoft/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
+            async with aiofiles.open("shared_files/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
                 content = await csv_file.read()
                 reader = csv.DictReader(content.splitlines(), delimiter=";")
 

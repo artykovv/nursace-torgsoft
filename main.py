@@ -1,6 +1,6 @@
 import asyncio
-from fastapi import FastAPI, Depends
-from pydantic import BaseModel
+from fastapi import FastAPI, Depends, File, UploadFile
+from fastapi.responses import FileResponse
 from tasks.sync import sync_torgsoft_csv
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.database import get_async_session
@@ -22,6 +22,29 @@ async def list_files():
     except Exception as e:
         return {"error": str(e)}
     return {"files": files}
+
+@app.get("/read-file")
+async def read_file(filename: str):
+    filepath = f"/app/shared_files/{filename}"
+    if not os.path.isfile(filepath):
+        return {"error": "File not found"}
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+    return {"content": content}
+
+@app.get("/download")
+async def download_file(filename: str):
+    filepath = f"/app/shared_files/{filename}"
+    if not os.path.exists(filepath):
+        return {"error": "File not found"}
+    return FileResponse(filepath, filename=filename)
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    dest = f"/app/shared_files/{file.filename}"
+    with open(dest, "wb") as f:
+        f.write(await file.read())
+    return {"message": f"{file.filename} uploaded successfully"}
 
 
 @app.post("/")
