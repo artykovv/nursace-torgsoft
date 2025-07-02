@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from tasks.sync import sync_torgsoft_csv
 from sqlalchemy.ext.asyncio import AsyncSession
 from config.database import get_async_session
-
+import os
 
 app = FastAPI()
 
@@ -13,6 +13,16 @@ async def base_router():
     return {
         "message": "Hello world"
     }
+
+@app.get("/files")
+async def list_files():
+    folder_path = "/app/shared_files"
+    try:
+        files = os.listdir(folder_path)
+    except Exception as e:
+        return {"error": str(e)}
+    return {"files": files}
+
 
 @app.post("/")
 async def sync_router(

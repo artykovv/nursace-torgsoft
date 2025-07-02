@@ -11,3 +11,4 @@ services:
     restart: always
     volumes:
       - .:/app
+      - /home/ftpuser/ftp/files:/app/shared_files
