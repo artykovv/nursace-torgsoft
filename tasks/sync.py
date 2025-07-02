@@ -1,12 +1,10 @@
 import csv
 import logging
-from typing import AsyncGenerator
 import aiofiles
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from models import (
     Product, Category, Manufacturer, Collection, Season, Sex, Color, Material,
-    MeasureUnit, Currency, ProductAttribute, ProductCurrencyPrice, Analog
+    MeasureUnit, Currency, ProductCurrencyPrice, Analog
 )
 from config.database import async_session_maker
 
