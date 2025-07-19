@@ -12,6 +12,24 @@ from config.database import async_session_maker
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def parse_int(value: str) -> int | None:
+    if not value or not value.strip():
+        return None
+    try:
+        return int(value.strip())
+    except ValueError:
+        logger.warning(f"Не удалось преобразовать в int: {value}")
+        return None
+    
+def parse_float(value: str) -> float | None:
+    if not value or not value.strip():
+        return None
+    try:
+        return float(value.replace(",", ".").strip())
+    except ValueError:
+        logger.warning(f"Не удалось преобразовать в float: {value}")
+        return None
+
 async def sync_torgsoft_csv() -> dict:
     async with async_session_maker() as session:
         """
@@ -81,8 +99,9 @@ async def sync_torgsoft_csv() -> dict:
         # Чтение CSV-файла
         try:
             async with aiofiles.open("shared_files/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
+            # async with aiofiles.open("torgsoft/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
                 content = await csv_file.read()
-                reader = csv.DictReader(content.splitlines(), delimiter=";")
+                reader = csv.DictReader(content.splitlines(), delimiter=",")
 
                 for row in reader:
                     # Обработка справочных данных
@@ -181,21 +200,21 @@ async def sync_torgsoft_csv() -> dict:
                         "description": row.get("Description") or None,
                         "articul": row.get("Articul") or None,
                         "barcode": row.get("Barcode") or None,
-                        "retail_price": float(row["RetailPrice"]) if row.get("RetailPrice") else None,
-                        "wholesale_price": float(row["WholesalePrice"]) if row.get("WholesalePrice") else None,
-                        "retail_price_with_discount": float(row["RetailPriceWithDiscount"]) if row.get("RetailPriceWithDiscount") else None,
-                        "prime_cost": float(row["PrimeCost"]) if row.get("PrimeCost") else None,
-                        "equal_sale_price": float(row["EqualSalePrice"]) if row.get("EqualSalePrice") else None,
-                        "equal_wholesale_price": float(row["EqualWholesalePrice"]) if row.get("EqualWholesalePrice") else None,
-                        "price_discount_percent": float(row["PriceDiscountPercent"]) if row.get("PriceDiscountPercent") else None,
-                        "min_quantity_for_order": int(row["MinQuantityForOrder"]) if row.get("MinQuantityForOrder") else None,
-                        "wholesale_count": float(row["WholesaleCount"]) if row.get("WholesaleCount") else None,
-                        "warehouse_quantity": float(row["WarehouseQuantity"]) if row.get("WarehouseQuantity") else None,
-                        "measure": float(row["Measure"]) if row.get("Measure") else None,
-                        "height": float(row["Height"]) if row.get("Height") else None,
-                        "width": float(row["Width"]) if row.get("Width") else None,
-                        "display": int(row["Display"]) if row.get("Display") else None,
-                        "closeout": int(row["Closeout"]) if row.get("Closeout") else None,
+                        "retail_price": parse_float(row.get("RetailPrice")),
+                        "wholesale_price": parse_float(row.get("WholesalePrice")),
+                        "retail_price_with_discount": parse_float(row.get("RetailPriceWithDiscount")),
+                        "prime_cost": parse_float(row.get("PrimeCost")),
+                        "equal_sale_price": parse_float(row.get("EqualSalePrice")),
+                        "equal_wholesale_price": parse_float(row.get("EqualWholesalePrice")),
+                        "price_discount_percent": parse_float(row.get("PriceDiscountPercent")),
+                        "min_quantity_for_order": parse_int(row.get("MinQuantityForOrder")),
+                        "wholesale_count": parse_float(row.get("WholesaleCount")),
+                        "warehouse_quantity": parse_float(row.get("WarehouseQuantity")),
+                        "measure": parse_float(row.get("Measure")),
+                        "height": parse_float(row.get("Height")),
+                        "width": parse_float(row.get("Width")),
+                        "display": parse_int(row.get("Display")),
+                        "closeout": parse_int(row.get("Closeout")),
                         "category_id": category_id,
                         "manufacturer_id": manufacturer.manufacturer_id,
                         "collection_id": collection_id,
@@ -204,22 +223,18 @@ async def sync_torgsoft_csv() -> dict:
                         "color_id": color.color_id,
                         "material_id": material.material_id,
                         "measure_unit_id": measure_unit.measure_unit_id,
-                        "guarantee_mes_unit_id": measure_unit.measure_unit_id,  # Предполагаем, что совпадает с MeasureUnit
+                        "guarantee_mes_unit_id": measure_unit.measure_unit_id,
                         "supplier_code": row.get("SupplierCode") or None,
-                        "model_good_id": int(row["Category"]) if row.get("Category") and row["Category"] != "-1" else None,
+                        "model_good_id": parse_int(row.get("Category")) if row.get("Category") != "-1" else None,
                         "pack": row.get("Pack") or None,
                         "pack_size": row.get("PackSize") or None,
                         "power_supply": row.get("PowerSupply") or None,
                         "count_units_per_box": row.get("CountUnitsPerBox") or None,
                         "age": row.get("Age") or None,
-
-                        "product_size": int(row.get("TheSize")) or None,
+                        "product_size": parse_float(row.get("TheSize")),
                         "fashion_name": row.get("FashionName") or None,
-                        # "good_type_full": row.get("GoodTypeFull") or None,
-                        # "producer_collection_full": row.get("ProducerCollectionFull") or None,
-                        "retail_price_per_unit": float(row.get("RetailPricePerUnit")) or None,
-                        "wholesale_price_per_unit": float(row.get("WholesalePricePerUnit")) or None,
-
+                        "retail_price_per_unit": parse_float(row.get("RetailPricePerUnit")),
+                        "wholesale_price_per_unit": parse_float(row.get("WholesalePricePerUnit")),
                     }
 
                     if product:
@@ -255,8 +270,8 @@ async def sync_torgsoft_csv() -> dict:
                         result = await session.execute(query)
                         price = result.scalars().first()
                         price_data = {
-                            "retail_price": float(row["EqualSalePrice"]) if row.get("EqualSalePrice") else None,
-                            "wholesale_price": float(row["EqualWholesalePrice"]) if row.get("EqualWholesalePrice") else None,
+                            "retail_price": parse_float(row.get("EqualSalePrice")),
+                            "wholesale_price": parse_float(row.get("EqualWholesalePrice")),
                         }
                         if price:
                             for key, value in price_data.items():
@@ -279,5 +294,6 @@ async def sync_torgsoft_csv() -> dict:
             logger.error(f"Ошибка при синхронизации: {str(e)}")
             await session.rollback()
             return {"error": f"Ошибка при синхронизации: {str(e)}"}
-
+        
+        logger.info(f"Синхронизирован {stats}")
         return stats

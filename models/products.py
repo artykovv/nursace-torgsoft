@@ -44,7 +44,7 @@ class Product(Base):
     power_supply = Column(String(255))
     count_units_per_box = Column(String(255))
     age = Column(String(255))
-    product_size = Column(Integer())  # TheSize из CSV
+    product_size = Column(Float())  # TheSize из CSV
     fashion_name = Column(String(255))  # FashionName из CSV
     # good_type_full = Column(String(255))  # GoodTypeFull из CSV
     # producer_collection_full = Column(String(255))  # ProducerCollectionFull из CSV

@@ -55,7 +55,9 @@ async def sync_router(
     if synced:
         print("Syncing products...")
         task = asyncio.create_task(sync_torgsoft_csv())
-        return task
+        return {
+            "message": "start product sync"
+        }
     else:
         print("Products not synced")
         return {
