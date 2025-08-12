@@ -49,7 +49,7 @@ async def sync_torgsoft_csv() -> dict:
             "collections_created": 0,
             "seasons_created": 0,
             "sexes_created": 0,
-            "colors_created": 0,
+            # "colors_created": 0,
             "materials_created": 0,
             "measure_units_created": 0,
             "currencies_created": 0,
@@ -162,10 +162,10 @@ async def sync_torgsoft_csv() -> dict:
                         stats["sexes_created"] += 1
 
                     # Цвет
-                    color_name = row.get("Color") or "Unknown"
-                    color, created = await get_or_create(Color, "color_name", color_name)
-                    if created:
-                        stats["colors_created"] += 1
+                    # color_name = row.get("Color") or "Unknown"
+                    # color, created = await get_or_create(Color, "color_name", color_name)
+                    # if created:
+                    #     stats["colors_created"] += 1
 
                     # Материал
                     material_name = row.get("Material") or "Unknown"
@@ -220,7 +220,7 @@ async def sync_torgsoft_csv() -> dict:
                         "collection_id": collection_id,
                         "season_id": season.season_id,
                         "sex_id": sex.sex_id,
-                        "color_id": color.color_id,
+                        # "color_id": color.color_id,
                         "material_id": material.material_id,
                         "measure_unit_id": measure_unit.measure_unit_id,
                         "guarantee_mes_unit_id": measure_unit.measure_unit_id,
