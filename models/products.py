@@ -6,7 +6,7 @@ from config.base_class import Base
 class Product(Base):
     __tablename__ = 'products'
 
-    good_id = Column(Integer, primary_key=True)
+    good_id = Column(Integer, primary_key=True, index=True)
     good_name = Column(String(500), nullable=False)
     short_name = Column(String(255))
     description = Column(String(255))

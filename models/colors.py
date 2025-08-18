@@ -7,5 +7,6 @@ class Color(Base):
     
     color_id = Column(Integer, primary_key=True)
     color_name = Column(String(50), nullable=False)
+    color_hex = Column(String(50), nullable=True)
     
     products = relationship("Product", back_populates="color")
