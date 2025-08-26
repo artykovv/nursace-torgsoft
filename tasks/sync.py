@@ -2,6 +2,7 @@ import csv
 import logging
 import aiofiles
 from sqlalchemy.future import select
+from sqlalchemy.exc import SQLAlchemyError
 from models import (
     Product, Category, Manufacturer, Collection, Season, Sex, Color, Material,
     MeasureUnit, Currency, ProductCurrencyPrice, Analog
@@ -63,101 +64,128 @@ def parse_float(value: str) -> float | None:
         return None
 
 async def sync_torgsoft_csv() -> dict:
-    async with async_session_maker() as session:
-        """
-        Синхронизирует данные из CSV-файла Торгсофт (torgsoft/TSGoods.csv) с базой данных.
+    """
+    Синхронизирует данные из CSV-файла Торгсофт (torgsoft/TSGoods.csv) с базой данных.
 
-        Args:
-            session: Асинхронная сессия SQLAlchemy.
+    Returns:
+        dict: Статистика синхронизации (количество созданных/обновленных записей).
+    """
+    stats = {
+        "products_created": 0,
+        "products_updated": 0,
+        "categories_created": 0,
+        "manufacturers_created": 0,
+        "collections_created": 0,
+        "seasons_created": 0,
+        "sexes_created": 0,
+        # "colors_created": 0,
+        "materials_created": 0,
+        "measure_units_created": 0,
+        "currencies_created": 0,
+        "attributes_created": 0,
+        "currency_prices_created": 0,
+        "analogs_created": 0,
+        "skipped_products": 0,
+        "rows_without_goodid": 0,
+    }
 
-        Returns:
-            dict: Статистика синхронизации (количество созданных/обновленных записей).
-        """
-        stats = {
-            "products_created": 0,
-            "products_updated": 0,
-            "categories_created": 0,
-            "manufacturers_created": 0,
-            "collections_created": 0,
-            "seasons_created": 0,
-            "sexes_created": 0,
-            # "colors_created": 0,
-            "materials_created": 0,
-            "measure_units_created": 0,
-            "currencies_created": 0,
-            "attributes_created": 0,
-            "currency_prices_created": 0,
-            "analogs_created": 0,
-            "skipped_products": 0,
-            "rows_without_goodid": 0,
-        }
-
-        async def get_or_create(model, filter_field, filter_value, defaults=None):
-            """Получает или создает запись в таблице, избегая дубликатов."""
-            try:
-                query = select(model).where(getattr(model, filter_field) == filter_value)
-                result = await session.execute(query)
-                instance = result.scalars().first()
-                if instance:
-                    return instance, False
-                instance = model(**{filter_field: filter_value, **(defaults or {})})
-                session.add(instance)
-                return instance, True
-            except Exception as e:
-                logger.error(f"Ошибка в get_or_create для {model.__name__}, поле {filter_field}: {str(e)}")
-                raise
-
-        async def get_or_create_hierarchy(model, parent_field, name_field, names, parent_id=None, defaults=None):
-            """Обрабатывает иерархию (например, для категорий или коллекций)."""
-            try:
-                current_parent_id = parent_id
-                last_instance = None
-                for name in names:
-                    instance, created = await get_or_create(
-                        model,
-                        name_field,
-                        name,
-                        defaults={parent_field: current_parent_id, **(defaults or {})}
-                    )
-                    if created:
-                        stats[f"{model.__tablename__}_created"] += 1
-                    last_instance = instance
-                    # Явно указываем правильное имя идентификатора
-                    id_field = 'category_id' if model.__name__ == 'Category' else 'collection_id' if model.__name__ == 'Collection' else 'id'
-                    current_parent_id = getattr(instance, id_field)
-                return last_instance
-            except Exception as e:
-                logger.error(f"Ошибка в get_or_create_hierarchy для {model.__name__}: {str(e)}")
-                raise
-
-        # Чтение CSV-файла
+    async def get_or_create(model, filter_field, filter_value, defaults=None, session=None):
+        """Получает или создает запись в таблице, избегая дубликатов."""
         try:
-            logger.info("Старт синхронизации: torgsoft/TSGoods.csv")
-            async with aiofiles.open("shared_files/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
-            # async with aiofiles.open("torgsoft/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
-                content = await csv_file.read()
+            query = select(model).where(getattr(model, filter_field) == filter_value)
+            result = await session.execute(query)
+            instance = result.scalars().first()
+            if instance:
+                return instance, False
+            instance = model(**{filter_field: filter_value, **(defaults or {})})
+            session.add(instance)
+            return instance, True
+        except SQLAlchemyError as e:
+            logger.error(f"Ошибка в get_or_create для {model.__name__}, поле {filter_field}: {str(e)}")
+            # Откатываем транзакцию и создаем новую сессию
+            await session.rollback()
+            raise
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка в get_or_create для {model.__name__}, поле {filter_field}: {str(e)}")
+            await session.rollback()
+            raise
 
-                # Определяем разделитель автоматически (поддержка "," и ";")
-                lines = content.splitlines()
-                sample = "\n".join(lines[:5])
+    async def get_or_create_hierarchy(model, parent_field, name_field, names, parent_id=None, defaults=None, session=None):
+        """Обрабатывает иерархию (например, для категорий или коллекций)."""
+        try:
+            current_parent_id = parent_id
+            last_instance = None
+            for name in names:
+                instance, created = await get_or_create(
+                    model,
+                    name_field,
+                    name,
+                    defaults={parent_field: current_parent_id, **(defaults or {})},
+                    session=session
+                )
+                if created:
+                    stats[f"{model.__tablename__}_created"] += 1
+                last_instance = instance
+                # Явно указываем правильное имя идентификатора
+                id_field = 'category_id' if model.__name__ == 'Category' else 'collection_id' if model.__name__ == 'Collection' else 'id'
+                current_parent_id = getattr(instance, id_field)
+            return last_instance
+        except SQLAlchemyError as e:
+            logger.error(f"Ошибка в get_or_create_hierarchy для {model.__name__}: {str(e)}")
+            await session.rollback()
+            raise
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка в get_or_create_hierarchy для {model.__name__}: {str(e)}")
+            await session.rollback()
+            raise
+
+    # Чтение CSV-файла
+    try:
+        logger.info("Старт синхронизации: torgsoft/TSGoods.csv")
+        # async with aiofiles.open("shared_files/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
+        async with aiofiles.open("torgsoft/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
+            content = await csv_file.read()
+
+            # Определяем разделитель автоматически (поддержка "," и ";")
+            lines = content.splitlines()
+            sample = "\n".join(lines[:5])
+            try:
+                dialect = csv.Sniffer().sniff(sample, delimiters=",;")
+                delimiter = dialect.delimiter
+            except Exception:
+                delimiter = ","
+            logger.info(f"Определён разделитель CSV: '{delimiter}', всего строк: {len(lines)}")
+            reader = csv.DictReader(lines, delimiter=delimiter)
+
+            # Детекторы/флаги
+            logged_headers_once = False
+            detected_good_id_key = None  # нормализованное имя ключа GoodID, если найдено эвристикой
+            processed_rows = 0
+            commit_batch_size = 100  # Размер батча для коммита
+
+            for row in reader:
+                processed_rows += 1
+                if processed_rows % 1000 == 0:
+                    logger.info(f"Прогресс: обработано {processed_rows} строк")
+
+                # Создаем новую сессию для каждой строки или батча
+                if processed_rows % commit_batch_size == 1:
+                    # Закрываем предыдущую сессию если она существует
+                    if 'session' in locals():
+                        try:
+                            await session.close()
+                        except:
+                            pass
+                    
+                    # Создаем новую сессию
+                    session = async_session_maker()
+                    try:
+                        await session.begin()
+                    except Exception as e:
+                        logger.error(f"Ошибка при создании сессии: {str(e)}")
+                        continue
+
                 try:
-                    dialect = csv.Sniffer().sniff(sample, delimiters=",;")
-                    delimiter = dialect.delimiter
-                except Exception:
-                    delimiter = ","
-                logger.info(f"Определён разделитель CSV: '{delimiter}', всего строк: {len(lines)}")
-                reader = csv.DictReader(lines, delimiter=delimiter)
-
-                # Детекторы/флаги
-                logged_headers_once = False
-                detected_good_id_key = None  # нормализованное имя ключа GoodID, если найдено эвристикой
-                processed_rows = 0
-
-                for row in reader:
-                    processed_rows += 1
-                    if processed_rows % 1000 == 0:
-                        logger.info(f"Прогресс: обработано {processed_rows} строк")
-
                     # Нормализуем ключи заголовков (убираем BOM/пробелы) и строим индекс
                     row = {normalize_header_key(k): v for k, v in row.items()}
                     row_idx = make_row_index(row)
@@ -221,7 +249,8 @@ async def sync_torgsoft_csv() -> dict:
                         try:
                             category = await get_or_create_hierarchy(
                                 Category, "parent_category_id", "category_name", category_names,
-                                defaults={"synchronization_section": category_names[0] if category_names else None}
+                                defaults={"synchronization_section": category_names[0] if category_names else None},
+                                session=session
                             )
                             category_id = category.category_id if category else None
                             logger.debug(f"Категория обработана: {category_names}, category_id={category_id}")
@@ -233,7 +262,8 @@ async def sync_torgsoft_csv() -> dict:
                     country_name = row_get(row_idx, "Country", "Страна") or "Unknown"
                     manufacturer, created = await get_or_create(
                         Manufacturer, "manufacturer_name", country_name,
-                        defaults={"country": country_name}
+                        defaults={"country": country_name},
+                        session=session
                     )
                     if created:
                         stats["manufacturers_created"] += 1
@@ -245,7 +275,8 @@ async def sync_torgsoft_csv() -> dict:
                         collection_names = [name.strip() for name in str(producer_collection_full).split(",") if name.strip()]
                         collection = await get_or_create_hierarchy(
                             Collection, "parent_collection_id", "collection_name", collection_names,
-                            defaults={"manufacturer_id": manufacturer.manufacturer_id}
+                            defaults={"manufacturer_id": manufacturer.manufacturer_id},
+                            session=session
                         )
                         collection_id = collection.collection_id if collection else None
                     else:
@@ -253,7 +284,7 @@ async def sync_torgsoft_csv() -> dict:
 
                     # Сезон
                     season_name = row_get(row_idx, "Season", "Сезон") or "Unknown"
-                    season, created = await get_or_create(Season, "season_name", season_name)
+                    season, created = await get_or_create(Season, "season_name", season_name, session=session)
                     if created:
                         stats["seasons_created"] += 1
                         logger.debug(f"Создан сезон: {season_name}")
@@ -269,21 +300,21 @@ async def sync_torgsoft_csv() -> dict:
                         5: "Унисекс"
                     }
                     sex_name = sex_mapping.get(sex_value, "Не определен")
-                    sex, created = await get_or_create(Sex, "sex_name", sex_name)
+                    sex, created = await get_or_create(Sex, "sex_name", sex_name, session=session)
                     if created:
                         stats["sexes_created"] += 1
                         logger.debug(f"Создан пол: {sex_name}")
 
                     # Материал
                     material_name = row_get(row_idx, "Material", "Материал") or "Unknown"
-                    material, created = await get_or_create(Material, "material_name", material_name)
+                    material, created = await get_or_create(Material, "material_name", material_name, session=session)
                     if created:
                         stats["materials_created"] += 1
                         logger.debug(f"Создан материал: {material_name}")
 
                     # Единица измерения
                     measure_unit_name = row_get(row_idx, "MeasureUnit", "Measure Unit", "ЕдИзм") or "Unknown"
-                    measure_unit, created = await get_or_create(MeasureUnit, "unit_name", measure_unit_name)
+                    measure_unit, created = await get_or_create(MeasureUnit, "unit_name", measure_unit_name, session=session)
                     if created:
                         stats["measure_units_created"] += 1
                         logger.debug(f"Создана единица измерения: {measure_unit_name}")
@@ -292,7 +323,7 @@ async def sync_torgsoft_csv() -> dict:
                     currency_name = row_get(row_idx, "EqualCurrencyName", "Currency", "Валюта") or None
                     currency_id = None
                     if currency_name:
-                        currency, created = await get_or_create(Currency, "currency_name", currency_name)
+                        currency, created = await get_or_create(Currency, "currency_name", currency_name, session=session)
                         if created:
                             stats["currencies_created"] += 1
                             logger.debug(f"Создана валюта: {currency_name}")
@@ -303,6 +334,7 @@ async def sync_torgsoft_csv() -> dict:
                     result = await session.execute(query)
                     product = result.scalars().first()
 
+                    # Базовые данные товара (без display)
                     product_data = {
                         "good_name": row_get(row_idx, "GoodName", "Name", "Наименование"),
                         "short_name": row_get(row_idx, "ShortName", "Short Name") or None,
@@ -322,7 +354,6 @@ async def sync_torgsoft_csv() -> dict:
                         "measure": parse_float(row_get(row_idx, "Measure")),
                         "height": parse_float(row_get(row_idx, "Height")),
                         "width": parse_float(row_get(row_idx, "Width")),
-                        "display": parse_int(row_get(row_idx, "Display")),
                         "closeout": parse_int(row_get(row_idx, "Closeout")),
                         "category_id": category_id,
                         "manufacturer_id": manufacturer.manufacturer_id,
@@ -348,11 +379,14 @@ async def sync_torgsoft_csv() -> dict:
 
                     if product:
                         logger.info(f"UPDATE: GoodID={good_id}")
+                        # Для существующих товаров обновляем все поля кроме display
                         for key, value in product_data.items():
                             setattr(product, key, value)
                         stats["products_updated"] += 1
                     else:
                         logger.info(f"CREATE: GoodID={good_id}")
+                        # Для новых товаров добавляем display = 1
+                        product_data["display"] = 1
                         product = Product(good_id=good_id, **product_data)
                         session.add(product)
                         stats["products_created"] += 1
@@ -399,17 +433,45 @@ async def sync_torgsoft_csv() -> dict:
                             session.add(price)
                             stats["currency_prices_created"] += 1
 
-            # Коммит изменений
-            logger.info("Начинаю коммит транзакции")
-            await session.commit()
-            logger.info("Коммит завершён")
-        except FileNotFoundError:
-            logger.error("Файл torgsoft/TSGoods.csv не найден")
-            return {"error": "Файл torgsoft/TSGoods.csv не найден"}
-        except Exception as e:
-            logger.error(f"Ошибка при синхронизации: {str(e)}")
-            await session.rollback()
-            return {"error": f"Ошибка при синхронизации: {str(e)}"}
-        
-        logger.info(f"Синхронизирован {stats}")
-        return stats
+                    # Коммитим батч каждые commit_batch_size строк
+                    if processed_rows % commit_batch_size == 0:
+                        try:
+                            await session.commit()
+                            logger.info(f"Коммит батча: {processed_rows} строк")
+                        except Exception as e:
+                            logger.error(f"Ошибка при коммите батча: {str(e)}")
+                            await session.rollback()
+                            continue
+
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке строки {processed_rows}: {str(e)}")
+                    try:
+                        await session.rollback()
+                    except:
+                        pass
+                    continue
+
+            # Коммитим оставшиеся изменения
+            if processed_rows % commit_batch_size != 0:
+                try:
+                    await session.commit()
+                    logger.info("Коммит финального батча завершён")
+                except Exception as e:
+                    logger.error(f"Ошибка при коммите финального батча: {str(e)}")
+                    await session.rollback()
+
+            # Закрываем сессию
+            try:
+                await session.close()
+            except:
+                pass
+
+    except FileNotFoundError:
+        logger.error("Файл torgsoft/TSGoods.csv не найден")
+        return {"error": "Файл torgsoft/TSGoods.csv не найден"}
+    except Exception as e:
+        logger.error(f"Ошибка при синхронизации: {str(e)}")
+        return {"error": f"Ошибка при синхронизации: {str(e)}"}
+    
+    logger.info(f"Синхронизирован {stats}")
+    return stats
