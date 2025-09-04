@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 
-from config.base_class import Base
+from config.nursace_database import Base
 
 class ProductImage(Base):
     __tablename__ = 'product_images'

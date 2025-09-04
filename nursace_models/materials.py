@@ -1,6 +1,6 @@
 from sqlalchemy import Column,  Integer,  String
 from sqlalchemy.orm import relationship
-from config.base_class import Base
+from config.nursace_database import Base
 
 class Material(Base):
     __tablename__ = 'materials'

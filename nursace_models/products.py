@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey
 from sqlalchemy.orm import relationship
 
-from config.base_class import Base
+from config.nursace_database import Base
 
 class Product(Base):
     __tablename__ = 'products'
@@ -33,7 +33,7 @@ class Product(Base):
     collection_id = Column(Integer, ForeignKey('collections.collection_id'))
     season_id = Column(Integer, ForeignKey('seasons.season_id'))
     sex_id = Column(Integer, ForeignKey('sexes.sex_id'))
-    color_id = Column(Integer, ForeignKey('colors.color_id'))
+    color_id = Column(Integer, ForeignKey('colors.color_id'), nullable=True)
     material_id = Column(Integer, ForeignKey('materials.material_id'))
     measure_unit_id = Column(Integer, ForeignKey('measure_units.measure_unit_id'))
     guarantee_mes_unit_id = Column(Integer, ForeignKey('measure_units.measure_unit_id'))
@@ -44,7 +44,7 @@ class Product(Base):
     power_supply = Column(String(255))
     count_units_per_box = Column(String(255))
     age = Column(String(255))
-    product_size = Column(Float())  # TheSize из CSV
+    product_size = Column(Float)  # TheSize из CSV
     fashion_name = Column(String(255))  # FashionName из CSV
     # good_type_full = Column(String(255))  # GoodTypeFull из CSV
     # producer_collection_full = Column(String(255))  # ProducerCollectionFull из CSV

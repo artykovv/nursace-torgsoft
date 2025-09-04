@@ -3,18 +3,18 @@ import logging
 import aiofiles
 from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
-from models import (
-    Product, Category, Manufacturer, Collection, Season, Sex, Color, Material,
+from marella_models import (
+    Product, Category, Manufacturer, Collection, Season, Sex, Material,
     MeasureUnit, Currency, ProductCurrencyPrice, Analog
 )
-from config.database import async_session_maker
+from config.marella_database import async_session_maker
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Категории верхнего уровня, которые нужно полностью исключить из загрузки
-EXCLUDED_ROOT_CATEGORIES = {"Одежда"}
+EXCLUDED_ROOT_CATEGORIES = {"Обувь"}
 
 # Утилиты для нормализации заголовков CSV
 
@@ -63,7 +63,7 @@ def parse_float(value: str) -> float | None:
         logger.warning(f"Не удалось преобразовать в float: {value}")
         return None
 
-async def sync_torgsoft_csv() -> dict:
+async def sync_torgsoft_csv_marella() -> dict:
     """
     Синхронизирует данные из CSV-файла Торгсофт (torgsoft/TSGoods.csv) с базой данных.
 
@@ -78,7 +78,6 @@ async def sync_torgsoft_csv() -> dict:
         "collections_created": 0,
         "seasons_created": 0,
         "sexes_created": 0,
-        # "colors_created": 0,
         "materials_created": 0,
         "measure_units_created": 0,
         "currencies_created": 0,
@@ -143,7 +142,7 @@ async def sync_torgsoft_csv() -> dict:
     try:
         logger.info("Старт синхронизации: torgsoft/TSGoods.csv")
         # async with aiofiles.open("shared_files/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
-        async with aiofiles.open("torgsoft/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
+        async with aiofiles.open("torgsoft/TSClother.csv", mode="r", encoding="utf-8") as csv_file:
             content = await csv_file.read()
 
             # Определяем разделитель автоматически (поддержка "," и ";")
@@ -334,7 +333,7 @@ async def sync_torgsoft_csv() -> dict:
                     result = await session.execute(query)
                     product = result.scalars().first()
 
-                    # Базовые данные товара (без display)
+                    # Базовые данные товара (без display и color_id)
                     product_data = {
                         "good_name": row_get(row_idx, "GoodName", "Name", "Наименование"),
                         "short_name": row_get(row_idx, "ShortName", "Short Name") or None,
@@ -355,12 +354,13 @@ async def sync_torgsoft_csv() -> dict:
                         "height": parse_float(row_get(row_idx, "Height")),
                         "width": parse_float(row_get(row_idx, "Width")),
                         "closeout": parse_int(row_get(row_idx, "Closeout")),
+                        "guarantee_period": parse_int(row_get(row_idx, "GuaranteePeriod", "Guarantee Period", "Гарантия")) or 0,
                         "category_id": category_id,
                         "manufacturer_id": manufacturer.manufacturer_id,
                         "collection_id": collection_id,
                         "season_id": season.season_id,
                         "sex_id": sex.sex_id,
-                        # "color_id": color.color_id,
+                        # "color_id": color.color_id,  # Исключаем из обновления
                         "material_id": material.material_id,
                         "measure_unit_id": measure_unit.measure_unit_id,
                         "guarantee_mes_unit_id": measure_unit.measure_unit_id,
@@ -371,7 +371,7 @@ async def sync_torgsoft_csv() -> dict:
                         "power_supply": row_get(row_idx, "PowerSupply", "Power Supply") or None,
                         "count_units_per_box": row_get(row_idx, "CountUnitsPerBox") or None,
                         "age": row_get(row_idx, "Age") or None,
-                        "product_size": parse_float(row_get(row_idx, "TheSize", "Size")),
+                        "product_size": row_get(row_idx, "TheSize", "Size"),
                         "fashion_name": row_get(row_idx, "FashionName") or None,
                         "retail_price_per_unit": parse_float(row_get(row_idx, "RetailPricePerUnit")),
                         "wholesale_price_per_unit": parse_float(row_get(row_idx, "WholesalePricePerUnit")),
@@ -379,9 +379,11 @@ async def sync_torgsoft_csv() -> dict:
 
                     if product:
                         logger.info(f"UPDATE: GoodID={good_id}")
-                        # Для существующих товаров обновляем все поля кроме display
+                        # Для существующих товаров обновляем все поля кроме display и color_id
+                        excluded_fields = {"display", "color_id"}
                         for key, value in product_data.items():
-                            setattr(product, key, value)
+                            if key not in excluded_fields:
+                                setattr(product, key, value)
                         stats["products_updated"] += 1
                     else:
                         logger.info(f"CREATE: GoodID={good_id}")

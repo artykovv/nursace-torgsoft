@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, ForeignKey, Float
 from sqlalchemy.orm import relationship
-from config.base_class import Base
+from config.marella_database import Base
 
 class ProductCurrencyPrice(Base):
     __tablename__ = 'product_currency_prices'
