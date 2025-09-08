@@ -1,6 +1,7 @@
 import csv
 import logging
 import aiofiles
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
 from nursace_models import (
@@ -8,10 +9,24 @@ from nursace_models import (
     MeasureUnit, Currency, ProductCurrencyPrice, Analog
 )
 from config.nursace_database import async_session_maker
+from config.config import IS_DEV
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Функция для условного логирования
+def dev_log(level, message):
+    """Логирует сообщение только в dev режиме"""
+    if IS_DEV:
+        if level == "info":
+            logger.info(message)
+        elif level == "debug":
+            logger.debug(message)
+        elif level == "warning":
+            logger.warning(message)
+        elif level == "error":
+            logger.error(message)
 
 # Категории верхнего уровня, которые нужно полностью исключить из загрузки
 EXCLUDED_ROOT_CATEGORIES = {"Одежда"}
@@ -51,7 +66,7 @@ def parse_int(value: str) -> int | None:
     try:
         return int(str(value).strip())
     except ValueError:
-        logger.warning(f"Не удалось преобразовать в int: {value}")
+        dev_log("warning", f"Не удалось преобразовать в int: {value}")
         return None
     
 def parse_float(value: str) -> float | None:
@@ -60,7 +75,7 @@ def parse_float(value: str) -> float | None:
     try:
         return float(str(value).replace(",", ".").strip())
     except ValueError:
-        logger.warning(f"Не удалось преобразовать в float: {value}")
+        dev_log("warning", f"Не удалось преобразовать в float: {value}")
         return None
 
 async def sync_torgsoft_csv_nursace() -> dict:
@@ -101,12 +116,12 @@ async def sync_torgsoft_csv_nursace() -> dict:
             session.add(instance)
             return instance, True
         except SQLAlchemyError as e:
-            logger.error(f"Ошибка в get_or_create для {model.__name__}, поле {filter_field}: {str(e)}")
+            dev_log("error", f"Ошибка в get_or_create для {model.__name__}, поле {filter_field}: {str(e)}")
             # Откатываем транзакцию и создаем новую сессию
             await session.rollback()
             raise
         except Exception as e:
-            logger.error(f"Неожиданная ошибка в get_or_create для {model.__name__}, поле {filter_field}: {str(e)}")
+            dev_log("error", f"Неожиданная ошибка в get_or_create для {model.__name__}, поле {filter_field}: {str(e)}")
             await session.rollback()
             raise
 
@@ -131,19 +146,19 @@ async def sync_torgsoft_csv_nursace() -> dict:
                 current_parent_id = getattr(instance, id_field)
             return last_instance
         except SQLAlchemyError as e:
-            logger.error(f"Ошибка в get_or_create_hierarchy для {model.__name__}: {str(e)}")
+            dev_log("error", f"Ошибка в get_or_create_hierarchy для {model.__name__}: {str(e)}")
             await session.rollback()
             raise
         except Exception as e:
-            logger.error(f"Неожиданная ошибка в get_or_create_hierarchy для {model.__name__}: {str(e)}")
+            dev_log("error", f"Неожиданная ошибка в get_or_create_hierarchy для {model.__name__}: {str(e)}")
             await session.rollback()
             raise
 
     # Чтение CSV-файла
     try:
-        logger.info("Старт синхронизации: torgsoft/TSGoods.csv")
-        async with aiofiles.open("shared_files/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
-        # async with aiofiles.open("torgsoft/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
+        dev_log("info", "Старт синхронизации: torgsoft/TSGoods.csv")
+        # async with aiofiles.open("shared_files/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
+        async with aiofiles.open("torgsoft/TSGoods.csv", mode="r", encoding="utf-8") as csv_file:
             content = await csv_file.read()
 
             # Определяем разделитель автоматически (поддержка "," и ";")
@@ -154,7 +169,7 @@ async def sync_torgsoft_csv_nursace() -> dict:
                 delimiter = dialect.delimiter
             except Exception:
                 delimiter = ","
-            logger.info(f"Определён разделитель CSV: '{delimiter}', всего строк: {len(lines)}")
+            dev_log("info", f"Определён разделитель CSV: '{delimiter}', всего строк: {len(lines)}")
             reader = csv.DictReader(lines, delimiter=delimiter)
 
             # Детекторы/флаги
@@ -166,7 +181,7 @@ async def sync_torgsoft_csv_nursace() -> dict:
             for row in reader:
                 processed_rows += 1
                 if processed_rows % 1000 == 0:
-                    logger.info(f"Прогресс: обработано {processed_rows} строк")
+                    dev_log("info", f"Прогресс: обработано {processed_rows} строк")
 
                 # Создаем новую сессию для каждой строки или батча
                 if processed_rows % commit_batch_size == 1:
@@ -182,7 +197,7 @@ async def sync_torgsoft_csv_nursace() -> dict:
                     try:
                         await session.begin()
                     except Exception as e:
-                        logger.error(f"Ошибка при создании сессии: {str(e)}")
+                        dev_log("error", f"Ошибка при создании сессии: {str(e)}")
                         continue
 
                 try:
@@ -192,7 +207,7 @@ async def sync_torgsoft_csv_nursace() -> dict:
 
                     # Однократно логируем заголовки для диагностики
                     if not logged_headers_once:
-                        logger.info(f"CSV headers: {list(row.keys())}")
+                        dev_log("info", f"CSV headers: {list(row.keys())}")
                         logged_headers_once = True
 
                     # Извлекаем значения с учётом возможных вариантов имён столбцов
@@ -217,17 +232,17 @@ async def sync_torgsoft_csv_nursace() -> dict:
                             if candidate_keys:
                                 detected_good_id_key = candidate_keys[0]
                                 good_id_raw = row_idx.get(detected_good_id_key)
-                                logger.info(f"Detected GoodID column: {detected_good_id_key}")
+                                dev_log("info", f"Detected GoodID column: {detected_good_id_key}")
 
                     # Теперь парсим good_id
                     if not good_id_raw or not str(good_id_raw).strip():
                         stats["rows_without_goodid"] += 1
-                        logger.debug(f"Пропуск строки без GoodID (row {processed_rows})")
+                        dev_log("debug", f"Пропуск строки без GoodID (row {processed_rows})")
                         continue
                     good_id = parse_int(good_id_raw)
                     if good_id is None:
                         stats["rows_without_goodid"] += 1
-                        logger.debug(f"Пропуск строки с некорректным GoodID (row {processed_rows})")
+                        dev_log("debug", f"Пропуск строки с некорректным GoodID (row {processed_rows})")
                         continue
 
                     # Пропуск строк по верхнему уровню GoodTypeFull (например, Одежда)
@@ -236,10 +251,10 @@ async def sync_torgsoft_csv_nursace() -> dict:
                         first_category_name = str(goodtypefull_value).split(",")[0].strip()
                         if first_category_name in EXCLUDED_ROOT_CATEGORIES:
                             stats["skipped_products"] += 1
-                            logger.info(f"SKIP: GoodID={good_id} из-за категории: {first_category_name}")
+                            dev_log("info", f"SKIP: GoodID={good_id} из-за категории: {first_category_name}")
                             continue
 
-                    logger.debug(f"ROW: {processed_rows} GoodID={good_id} root_category={first_category_name}")
+                    dev_log("debug", f"ROW: {processed_rows} GoodID={good_id} root_category={first_category_name}")
 
                     # Обработка справочных данных
                     # Категории (GoodTypeFull)
@@ -253,9 +268,9 @@ async def sync_torgsoft_csv_nursace() -> dict:
                                 session=session
                             )
                             category_id = category.category_id if category else None
-                            logger.debug(f"Категория обработана: {category_names}, category_id={category_id}")
+                            dev_log("debug", f"Категория обработана: {category_names}, category_id={category_id}")
                         except Exception as e:
-                            logger.error(f"Ошибка при обработке категорий {category_names}: {str(e)}")
+                            dev_log("error", f"Ошибка при обработке категорий {category_names}: {str(e)}")
                             continue  # Пропускаем товар, если ошибка в категориях
 
                     # Производитель и страна
@@ -267,7 +282,7 @@ async def sync_torgsoft_csv_nursace() -> dict:
                     )
                     if created:
                         stats["manufacturers_created"] += 1
-                        logger.debug(f"Создан производитель: {country_name}")
+                        dev_log("debug", f"Создан производитель: {country_name}")
 
                     # Коллекции (ProducerCollectionFull)
                     producer_collection_full = row_get(row_idx, "ProducerCollectionFull", "ProducerCollection", "Producer Collection Full")
@@ -336,14 +351,13 @@ async def sync_torgsoft_csv_nursace() -> dict:
 
                     # Базовые данные товара (без display и color_id)
                     product_data = {
-                        "good_name": row_get(row_idx, "GoodName", "Name", "Наименование"),
+                        "good_name": row_get(row_idx, "GoodName", "Name", "Наименование") or f"Товар {good_id}",
                         "short_name": row_get(row_idx, "ShortName", "Short Name") or None,
                         "description": row_get(row_idx, "Description", "Опис", "Описание") or None,
                         "articul": row_get(row_idx, "Articul", "Артикул") or None,
                         "barcode": row_get(row_idx, "Barcode", "Штрихкод") or None,
                         "retail_price": parse_float(row_get(row_idx, "RetailPrice", "Retail Price")),
                         "wholesale_price": parse_float(row_get(row_idx, "WholesalePrice", "Wholesale Price")),
-                        "retail_price_with_discount": parse_float(row_get(row_idx, "RetailPriceWithDiscount")),
                         "prime_cost": parse_float(row_get(row_idx, "PrimeCost", "Себестоимость")),
                         "equal_sale_price": parse_float(row_get(row_idx, "EqualSalePrice")),
                         "equal_wholesale_price": parse_float(row_get(row_idx, "EqualWholesalePrice")),
@@ -379,17 +393,18 @@ async def sync_torgsoft_csv_nursace() -> dict:
                     }
 
                     if product:
-                        logger.info(f"UPDATE: GoodID={good_id}")
-                        # Для существующих товаров обновляем все поля кроме display и color_id
-                        excluded_fields = {"display", "color_id"}
+                        # logger.info(f"UPDATE: GoodID={good_id}")
+                        # Для существующих товаров обновляем все поля кроме display, color_id и retail_price_with_discount
+                        excluded_fields = {"display", "color_id", "retail_price_with_discount"}
                         for key, value in product_data.items():
                             if key not in excluded_fields:
                                 setattr(product, key, value)
                         stats["products_updated"] += 1
                     else:
-                        logger.info(f"CREATE: GoodID={good_id}")
-                        # Для новых товаров добавляем display = 1
+                        dev_log("info", f"CREATE: GoodID={good_id}")
+                        # Для новых товаров добавляем display = 1 и retail_price_with_discount
                         product_data["display"] = 1
+                        product_data["retail_price_with_discount"] = parse_float(row_get(row_idx, "RetailPriceWithDiscount"))
                         product = Product(good_id=good_id, **product_data)
                         session.add(product)
                         stats["products_created"] += 1
@@ -440,7 +455,7 @@ async def sync_torgsoft_csv_nursace() -> dict:
                     if processed_rows % commit_batch_size == 0:
                         try:
                             await session.commit()
-                            logger.info(f"Коммит батча: {processed_rows} строк")
+                            dev_log("info", f"Коммит батча: {processed_rows} строк")
                         except Exception as e:
                             logger.error(f"Ошибка при коммите батча: {str(e)}")
                             await session.rollback()
@@ -458,7 +473,7 @@ async def sync_torgsoft_csv_nursace() -> dict:
             if processed_rows % commit_batch_size != 0:
                 try:
                     await session.commit()
-                    logger.info("Коммит финального батча завершён")
+                    dev_log("info", "Коммит финального батча завершён")
                 except Exception as e:
                     logger.error(f"Ошибка при коммите финального батча: {str(e)}")
                     await session.rollback()
@@ -476,5 +491,13 @@ async def sync_torgsoft_csv_nursace() -> dict:
         logger.error(f"Ошибка при синхронизации: {str(e)}")
         return {"error": f"Ошибка при синхронизации: {str(e)}"}
     
-    logger.info(f"Синхронизирован {stats}")
+    # Финальный лог с датой и временем для прода
+    if IS_DEV:
+        logger.info(f"Синхронизирован {stats}")
+    else:
+        # Для прода показываем с датой и временем UTC+6
+        utc_plus_6 = timezone(timedelta(hours=6))
+        current_time = datetime.now(utc_plus_6).strftime("%Y-%m-%d %H:%M:%S UTC+6")
+        logger.info(f"[{current_time}] Синхронизирован {stats}")
+    
     return stats
